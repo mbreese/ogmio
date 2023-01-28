@@ -335,7 +335,7 @@ class RefIndex(object):
 
             if line.startswith("#motif "):
                 num = int(line.strip().split(':')[0].split(' ')[1])
-                motif = line.strip().split(':')[1].split('/')[0]
+                motif = line.strip().split(':')[1].split('/')[0].strip()
                 self._motifs[num] = motif
                 continue
 
@@ -358,6 +358,8 @@ class RefIndex(object):
     def get_motifs(self):
         return self._motifs
 
+    def get_motif(self, idx):
+        return self._motifs[idx]
     
     def get_ref_labels(self, ref):
         return self._refs[ref]

@@ -6,7 +6,7 @@ import math
 
 
 class Aligner(object):
-    def __init__(self, target: list[tuple[int, int]], bp_per_pixel: int = 1, match_score = 10, mismatch_score=-100, match_distance_weight=0.2, motif_mismatch_penalty = -20, deletion_penalty = -10, insertion_penalty = -20):
+    def __init__(self, tname, target: list[tuple[int, int]], bp_per_pixel: int = 1, match_score = 10, mismatch_score=-100, match_distance_weight=0.2, motif_mismatch_penalty = -20, deletion_penalty = -10, insertion_penalty = -20):
         self._match_score = match_score
         self._mismatch_score = mismatch_score
         self._match_distance_weight = match_distance_weight
@@ -14,28 +14,31 @@ class Aligner(object):
         self._deletion_penalty = deletion_penalty
         self._insertion_penalty = insertion_penalty
 
+        self._target = target
+        self._tname = tname
+
         # setup the target gap list
         last_pixel_t = 0
         last_motif_t = -1
         last_pos_t = 0
-        self.t_gaps: list[tuple[int,int,int,int]] = []
+        self._t_gaps: list[tuple[int,int,int,int]] = []
 
         for i, (pos, motif) in enumerate(target):
             pixel = math.floor(pos / bp_per_pixel)
 
             if last_pixel_t:
                 v = (pixel-last_pixel_t, last_motif_t, last_pos_t, pos)
-                if len(self.t_gaps) == 0 or self.t_gaps[-1] != v:
-                    self.t_gaps.append(v)
+                if len(self._t_gaps) == 0 or self._t_gaps[-1] != v:
+                    self._t_gaps.append(v)
 
             last_pixel_t = pixel
             last_motif_t = motif
             last_pos_t = pos
 
-        self.t_gaps.append((-1, last_motif_t, last_pos_t, -1))
+        self._t_gaps.append((-1, last_motif_t, last_pos_t, -1))
 
 
-    def align(self, query: list[tuple[int, int]], bp_per_pixel: int = 1, revcomp = False, stretch_factor = 1.0, qname=None, tname=None):
+    def align(self, query: list[tuple[int, int]], bp_per_pixel: int = 1, revcomp = False, stretch_factor = 1.0, qname=None):
 
         # We will align based on the distance between labels/motifs. This means that we will be aligning based on 1-based indexing
         # but used 0-based indexing for the query/target positions. Effectively, we will have one less gap than label in the molecule.
@@ -86,7 +89,7 @@ class Aligner(object):
         # calculate the matrix
         for i in range(len(q_gaps)):
             m.append([])
-            for j in range(len(self.t_gaps)):
+            for j in range(len(self._t_gaps)):
                 left_score = 0
                 up_score = 0
                 diag_score = 0
@@ -99,16 +102,16 @@ class Aligner(object):
                         up_score = m[i-1][j][0] + self._insertion_penalty
                 if j > 0:
                     # if the left pixel is the same (zero distance, same motif), merge, otherwise, it's a deletion
-                    if self.t_gaps[j][0] == 0 and self.t_gaps[j-1][1] == self.t_gaps[j][1]:
+                    if self._t_gaps[j][0] == 0 and self._t_gaps[j-1][1] == self._t_gaps[j][1]:
                         left_score = m[i][j-1][0]
                     else:
                         left_score = m[i][j-1][0] + self._deletion_penalty
                 if i > 0 and j > 0:
                     # if we have the same pixels, then merge, otherwise look for match/mismatch
-                    if q_gaps[i][0] == 0 and q_gaps[i-1][1] == q_gaps[i][1] and self.t_gaps[j][0] == 0 and self.t_gaps[j-1][1] == self.t_gaps[j][1]:
+                    if q_gaps[i][0] == 0 and q_gaps[i-1][1] == q_gaps[i][1] and self._t_gaps[j][0] == 0 and self._t_gaps[j-1][1] == self._t_gaps[j][1]:
                         diag_score = m[i-1][j-1][0]
                     else:
-                        diag_score = m[i-1][j-1][0] + self.score_pos(q_gaps[i-1][0], self.t_gaps[j-1][0], q_gaps[i-1][1], self.t_gaps[j-1][1])
+                        diag_score = m[i-1][j-1][0] + self.score_pos(q_gaps[i-1][0], self._t_gaps[j-1][0], q_gaps[i-1][1], self._t_gaps[j-1][1])
 
                 scores = [(diag_score, 'd'), (up_score, 'u'), (left_score, 'l')]
                 scores = sorted(scores)
@@ -125,6 +128,9 @@ class Aligner(object):
                 else:
                     best = (left_score, 'l')
 
+                if best[0] < 0:
+                    best = (0, 'd')
+
                 if (best[0] > best_score):
                     best_score = best[0]
                     best_i = i
@@ -137,10 +143,11 @@ class Aligner(object):
         j = best_j
 
         qmatch = [q_gaps[i]]
-        tmatch = [self.t_gaps[j]]
+        tmatch = [self._t_gaps[j]]
 
         dir = m[i][j][1]
         cigar = ''
+
         if dir == 'd':
             cigar = 'M' + cigar
         elif dir == 'u':
@@ -159,7 +166,7 @@ class Aligner(object):
                 # yes, do this after the decrement
                 cigar = 'M' + cigar
                 qmatch.insert(0, q_gaps[i])
-                tmatch.insert(0, self.t_gaps[j])
+                tmatch.insert(0, self._t_gaps[j])
 
             elif dir == 'u':
                 i -= 1
@@ -169,7 +176,7 @@ class Aligner(object):
             elif dir == 'l':
                 j -= 1
                 cigar = 'D' + cigar
-                tmatch.insert(0, self.t_gaps[j])
+                tmatch.insert(0, self._t_gaps[j])
             else:
                 sys.stderr.write("Bad matrix!\n")
                 sys.exit(1)
@@ -178,11 +185,18 @@ class Aligner(object):
 
         cigar = self.simplify_cigar(cigar)
 
+        # add soft clipping to the front/back of the cigar
+        if best_i  < len(q_gaps)-1:
+            cigar='%s%sS' % (cigar, (len(q_gaps)-1)-best_i)
+        if i > 0:
+            cigar='%sS%s' % (i, cigar)
+            
 
-        # self.write_matrix(q_gaps, t_gaps, m, query, target, bp_per_pixel, stretch_factor)
+
+        # self.write_matrix(q_gaps, self._t_gaps, m, query, self._target, bp_per_pixel, stretch_factor)
 
         # sys.stdout.write('Best score: %s (%s, %s)\n' % (best_score, best_i, best_j))
-        # sys.stdout.write('%s, %s, %s %s\n' % (query[best_i], target[best_j], best_score, cigar))
+        # sys.stdout.write('%s, %s, %s %s\n' % (query[best_i], self._target[best_j], best_score, cigar))
         # sys.stdout.write('[%s] %s\n' % (len(qmatch), ','.join([str(x) for x in qmatch])))
         # sys.stdout.write('[%s] %s\n' % (len(tmatch), ','.join([str(x) for x in tmatch])))
 
@@ -203,7 +217,7 @@ class Aligner(object):
 
         # sys.stdout.write('[%s] %s\n' % (len(aligned_pos), ','.join([str(x) for x in aligned_pos])))
 
-        return Alignment(qname, tname, query, aligned_pos, best_score, cigar)
+        return Alignment(qname, self._tname, query, aligned_pos, best_score, cigar, '+' if not revcomp else '-')
 
 
 
@@ -237,7 +251,7 @@ class Aligner(object):
         if q_motif != t_motif:
             return self._motif_mismatch_penalty
         
-        return max(0, (1 - (abs(q_gap - t_gap) * self._match_distance_weight)) * self._match_score) 
+        return max(self._mismatch_score, (1 - (abs(q_gap - t_gap) * self._match_distance_weight)) * self._match_score) 
 
 
     def write_matrix(self, q_gaps, t_gaps, m, query, target, bp_per_pixel, stretch_factor):
@@ -271,19 +285,32 @@ class Aligner(object):
 
 
 class Alignment(object):
-    def __init__(self, qname, tname, q_orig_label, q_aligned_pos, score, cigar):
+    def __init__(self, qname, tname, q_orig_label, q_aligned_pos, score, cigar, direction):
         self._qname = qname
         self._tname = tname
         self._q_orig_label = q_orig_label
         self._q_aligned_pos = q_aligned_pos
         self._score = score
         self._cigar = cigar
+        self._direction = direction
 
-    def write(self, out=sys.stdout):
-        cols = [self._qname, self._tname, 
-                self._score, self._cigar, 
-                ','.join(['%s:%s' % (x[0], x[1]) for x in self._q_orig_label]), 
-                ','.join([str(x) for x in self._q_aligned_pos])
+    def write(self, out=sys.stdout, multiple=False):
+        flags = 0
+
+        if multiple:
+            # multiple alignments exist (not paired-end...)
+            flags |= 0x01
+
+        if not self._q_aligned_pos:
+            # unmapped
+            flags |= 0x04
+
+        cols = [self._qname, flags, self._tname, 
+                self._q_aligned_pos[0] if self._q_aligned_pos else '',
+                self._q_aligned_pos[-1] if self._q_aligned_pos else '',
+                self._direction, self._score, self._cigar, 
+                ','.join(['%s|%s' % (x[0], x[1]) for x in self._q_orig_label]), 
+                ','.join([str(x) for x in self._q_aligned_pos]) if self._q_aligned_pos else ''
                 ]
         out.write('%s\n' % '\t'.join([str(x) for x in cols]))
 
@@ -296,13 +323,16 @@ def main(ref_fname, bnx_fname, use_stretch=True):
 
     log = ogmio.Logger()
 
+    for i, motif in enumerate(bnx._header._labels):
+        sys.stdout.write('#motif %s: %s;%s\n' % (i+1, motif[0], motif[1]))
+
     i = 1
     for mol in bnx.molecules():
         if mol:
             #sys.stdout.write(repr(mol))
             #sys.stdout.write('===============\n')
 
-            best_aln = None
+            best_aln = []
 
             mol_all =  mol.get_all_labels()
 
@@ -312,30 +342,44 @@ def main(ref_fname, bnx_fname, use_stretch=True):
             for ref in idx.get_refs():
                 k = (ref, mol.get_run()._bases_per_pixel)
                 if not k in aligners:
-                    aligners[k] = Aligner(idx.get_ref_labels(ref), mol.get_run()._bases_per_pixel)
+                    aligners[k] = Aligner(ref, idx.get_ref_labels(ref), mol.get_run()._bases_per_pixel)
                 
                 aligner = aligners[k]
 
 
                 if best_aln:
-                    log.write('[%s/%s] %s (%s): %s (%s:%s)' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref, best_aln._tname, best_aln._score), True)
+                    log.write('[%s/%s] %s (%s): %s (%s:%s%s)' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref, best_aln[0]._tname, best_aln[0]._score, '*' if len(best_aln) >1 else ''), True)
                 else:
                     log.write('[%s/%s] %s (%s): %s' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref), True)
                 # if ref != 'chr12':
                 #     continue
 
-                aln1 = aligner.align(mol_all, bp_per_pixel=mol.get_run()._bases_per_pixel, revcomp=False, stretch_factor=mol.get_run()._stretch_factor if use_stretch else 1, qname=mol._molecule_id, tname=ref)
-                aln2 = aligner.align(mol_all, bp_per_pixel=mol.get_run()._bases_per_pixel, revcomp=True, stretch_factor=mol.get_run()._stretch_factor if use_stretch else 1, qname=mol._molecule_id, tname=ref)
+                aln1 = aligner.align(mol_all, bp_per_pixel=mol.get_run()._bases_per_pixel, revcomp=False, stretch_factor=mol.get_run()._stretch_factor if use_stretch else 1, qname=mol._molecule_id)
+                aln2 = aligner.align(mol_all, bp_per_pixel=mol.get_run()._bases_per_pixel, revcomp=True, stretch_factor=mol.get_run()._stretch_factor if use_stretch else 1, qname=mol._molecule_id)
 
-                if not best_aln or best_aln._score < aln1._score:
-                    best_aln = aln1
-
-                if not best_aln or best_aln._score < aln2._score:
-                    best_aln = aln2
+                if not best_aln:
+                    if aln1._score > aln2._score:
+                        best_aln = [aln1,]
+                    elif aln2._score > aln1._score:
+                        best_aln = [aln2,]
+                    else:
+                        best_aln = [aln1,aln2]
+                else:
+                    if aln1._score > aln2._score and aln1._score > best_aln[0]._score:
+                        best_aln = [aln1,]
+                    elif aln2._score > aln1._score and aln2._score > best_aln[0]._score:
+                        best_aln = [aln2,]
+                    else:
+                        if aln1._score == best_aln[0]._score:
+                            best_aln.append(aln1)
+                        if aln2._score == best_aln[0]._score:
+                            best_aln.append(aln2)
 
             if best_aln:
-                log.write('[%s/%s] %s\t%s\t%s\t%s\n' % (i, mol._header._num_of_molecules, mol._molecule_id, best_aln._tname, best_aln._score, best_aln._cigar), True)
-                best_aln.write()
+                for aln in best_aln:
+                    log.write('[%s/%s] %s\t%s\t%s\t%s\n' % (i, mol._header._num_of_molecules, mol._molecule_id, aln._tname, aln._score, aln._cigar), True)
+                    aln.write(multiple = len(best_aln) > 1)
+                sys.stdout.flush()
 
         i += 1
     log.close()
