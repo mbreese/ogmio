@@ -348,7 +348,7 @@ def main(ref_fname, bnx_fname, use_stretch=True):
 
 
                 if best_aln:
-                    log.write('[%s/%s] %s (%s): %s (%s:%s%s)' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref, best_aln[0]._tname, best_aln[0]._score, '*' if len(best_aln) >1 else ''), True)
+                    log.write('[%s/%s] %s (%s): %s (%s:%s%s %s)' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref, best_aln[0]._tname, best_aln[0]._score, '*' if len(best_aln) >1 else '', best_aln[0]._cigar), True)
                 else:
                     log.write('[%s/%s] %s (%s): %s' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref), True)
                 # if ref != 'chr12':
