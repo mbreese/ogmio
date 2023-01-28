@@ -2,3 +2,5 @@ data/
 docs/
 ref/
 tmp/
+bin/ogmio/__pycache__/
+*.pyc

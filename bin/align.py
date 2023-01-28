@@ -6,13 +6,13 @@ import math
 
 
 class Aligner(object):
-    def __init__(self, target: list[tuple[int, int]], bp_per_pixel: int = 1, match_score = 10, mismatch_score=-10, match_distance_weight=0.2, motif_mismatch_penalty = -10, missing_label_penalty = -10, extra_label_penalty = -10):
+    def __init__(self, target: list[tuple[int, int]], bp_per_pixel: int = 1, match_score = 10, mismatch_score=-100, match_distance_weight=0.2, motif_mismatch_penalty = -20, deletion_penalty = -10, insertion_penalty = -20):
         self._match_score = match_score
         self._mismatch_score = mismatch_score
         self._match_distance_weight = match_distance_weight
         self._motif_mismatch_penalty = motif_mismatch_penalty
-        self._missing_label_penalty = missing_label_penalty
-        self._extra_label_penalty = extra_label_penalty
+        self._deletion_penalty = deletion_penalty
+        self._insertion_penalty = insertion_penalty
 
         # setup the target gap list
         last_pixel_t = 0
@@ -96,16 +96,16 @@ class Aligner(object):
                     if q_gaps[i][0] == 0 and q_gaps[i-1][1] == q_gaps[i][1]:
                         up_score = m[i-1][j][0]
                     else:
-                        up_score = m[i-1][j][0] + self._extra_label_penalty
+                        up_score = m[i-1][j][0] + self._insertion_penalty
                 if j > 0:
                     # if the left pixel is the same (zero distance, same motif), merge, otherwise, it's a deletion
-                    if self.t_gaps[i][0] == 0 and self.t_gaps[j-1][1] == self.t_gaps[j][1]:
+                    if self.t_gaps[j][0] == 0 and self.t_gaps[j-1][1] == self.t_gaps[j][1]:
                         left_score = m[i][j-1][0]
                     else:
-                        left_score = m[i][j-1][0] + self._missing_label_penalty
+                        left_score = m[i][j-1][0] + self._deletion_penalty
                 if i > 0 and j > 0:
                     # if we have the same pixels, then merge, otherwise look for match/mismatch
-                    if q_gaps[i][0] == 0 and q_gaps[i-1][1] == q_gaps[i][1] and self.t_gaps[i][0] == 0 and self.t_gaps[j-1][1] == self.t_gaps[j][1]:
+                    if q_gaps[i][0] == 0 and q_gaps[i-1][1] == q_gaps[i][1] and self.t_gaps[j][0] == 0 and self.t_gaps[j-1][1] == self.t_gaps[j][1]:
                         diag_score = m[i-1][j-1][0]
                     else:
                         diag_score = m[i-1][j-1][0] + self.score_pos(q_gaps[i-1][0], self.t_gaps[j-1][0], q_gaps[i-1][1], self.t_gaps[j-1][1])
@@ -317,7 +317,10 @@ def main(ref_fname, bnx_fname, use_stretch=True):
                 aligner = aligners[k]
 
 
-                log.write('[%s/%s] %s: %s' % (i, mol._header._num_of_molecules, mol._molecule_id, ref), True)
+                if best_aln:
+                    log.write('[%s/%s] %s (%s): %s (%s:%s)' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref, best_aln._tname, best_aln._score), True)
+                else:
+                    log.write('[%s/%s] %s (%s): %s' % (i, mol._header._num_of_molecules, mol._molecule_id, len(mol_all), ref), True)
                 # if ref != 'chr12':
                 #     continue
 
